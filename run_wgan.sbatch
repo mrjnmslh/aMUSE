@@ -12,4 +12,4 @@
 module load python/intel/2.7.12 pytorch/0.2.0_1 protobuf/intel/3.1.0
 
 # Default model.
-python unsupervised_wgan.py --src_lang zh --tgt_lang en --src_emb /scratch/nn1119/infgan/wiki.zh.vec --tgt_emb  /scratch/nn1119/infgan/wiki.en.vec --refinement True --n_epochs 10
+python unsupervised_wgan.py --src_lang zh --tgt_lang en --src_emb /scratch/nn1119/infgan/wiki.zh.vec --tgt_emb  /scratch/nn1119/infgan/wiki.en.vec --refinement True --n_epochs 10 --dis_optimizer sgd,lr=0.0001 --gen_optimizer sgd,lr=0.0001
