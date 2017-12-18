@@ -80,6 +80,37 @@ class Trainer(object):
 
         return x, y
 
+    def get_wgan_dis_xy(self, volatile):
+        """
+        Get discriminator input batch / output target.
+        """
+        # select random word IDs
+        bs = self.params.batch_size
+        mf = self.params.dis_most_frequent
+        assert mf <= min(len(self.src_dico), len(self.tgt_dico))
+        src_ids = torch.LongTensor(bs).random_(len(self.src_dico) if mf == 0 else mf)
+        tgt_ids = torch.LongTensor(bs).random_(len(self.tgt_dico) if mf == 0 else mf)
+        if self.params.cuda:
+            src_ids = src_ids.cuda()
+            tgt_ids = tgt_ids.cuda()
+
+        # get word embeddings
+        src_emb = self.src_emb(Variable(src_ids, volatile=True))
+        tgt_emb = self.tgt_emb(Variable(tgt_ids, volatile=True))
+        src_emb = self.mapping(Variable(src_emb.data, volatile=volatile)) # get Wx + b, training W.
+        tgt_emb = Variable(tgt_emb.data, volatile=volatile)
+
+        # input / target
+        #x = torch.cat([src_emb, tgt_emb], 0)
+        x - src_emb # * noise
+        y = tgt_emb
+        #y = torch.FloatTensor(2 * bs).zero_()
+        #y[:bs] = 1 - self.params.dis_smooth
+        #y[bs:] = self.params.dis_smooth
+        #y = Variable(y.cuda() if self.params.cuda else y)
+
+        return x, y
+
     def dis_step(self, stats):
         """
         Train the discriminator.
@@ -103,6 +134,35 @@ class Trainer(object):
         self.dis_optimizer.step()
         clip_parameters(self.discriminator, self.params.dis_clip_weights)
 
+    def wgan_dis_step(self, stats):
+        """
+        Train the discriminator.
+        """
+        self.discriminator.train()
+
+        # loss
+        x, y = self.get_wgan_dis_xy(volatile=True)
+        real = self.discriminator(Variable(y.data))
+        fake = self.discriminator(Variable(x.data))
+
+        real.backward(one)
+        fake.backward(mone)
+
+        #loss = F.binary_cross_entropy(fake, real)
+        errD = real - fake
+        stats['DIS_COSTS'].append(errD)
+
+        # check NaN
+        if (loss != loss).data.any():
+            logger.error("NaN detected (discriminator)")
+            exit()
+
+        # optim
+        self.dis_optimizer.zero_grad()
+        #loss.backward()
+        self.dis_optimizer.step()
+        clip_parameters(self.discriminator, self.params.dis_clip_weights)
+
     def mapping_step(self, stats):
         """
         Fooling discriminator training step.
@@ -114,6 +174,34 @@ class Trainer(object):
 
         # loss
         x, y = self.get_dis_xy(volatile=False)
+        preds = self.discriminator(x)
+        loss = F.binary_cross_entropy(preds, 1 - y)
+        loss = self.params.dis_lambda * loss
+
+        # check NaN
+        if (loss != loss).data.any():
+            logger.error("NaN detected (fool discriminator)")
+            exit()
+
+        # optim
+        self.map_optimizer.zero_grad()
+        loss.backward()
+        self.map_optimizer.step()
+        self.orthogonalize()
+
+        return 2 * self.params.batch_size
+
+    def wgan_generator_step(self, stats):
+        """
+        Fooling discriminator training step.
+        """
+        if self.params.dis_lambda == 0:
+            return 0
+
+        self.discriminator.eval()
+
+        # loss
+        x, y = self.get_wgan_dis_xy(volatile=False)
         preds = self.discriminator(x)
         loss = F.binary_cross_entropy(preds, 1 - y)
         loss = self.params.dis_lambda * loss
