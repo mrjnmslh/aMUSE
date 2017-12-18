@@ -102,6 +102,7 @@ def build_model(params, with_dis):
         mapping.cuda()
         if with_dis:
             discriminator.cuda()
+            generator.cuda()
 
     # normalize embeddings
     normalize_embeddings(src_emb.weight.data, params.normalize_embeddings)
