@@ -14,7 +14,7 @@ import numpy as np
 import torch
 
 from src.utils import bool_flag, initialize_exp
-from src.models import build_model
+from src.wgan_models import build_model
 from src.trainer import Trainer
 from src.evaluation import Evaluator
 
@@ -54,6 +54,7 @@ parser.add_argument("--epoch_size", type=int, default=1000000, help="Iterations 
 parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
 parser.add_argument("--map_optimizer", type=str, default="sgd,lr=0.1", help="Mapping optimizer")
 parser.add_argument("--dis_optimizer", type=str, default="sgd,lr=0.1", help="Discriminator optimizer")
+parser.add_argument("--gen_optimizer", type=str, default="sgd,lr=0.1", help="Discriminator optimizer")
 parser.add_argument("--lr_decay", type=float, default=0.98, help="Learning rate decay (SGD only)")
 parser.add_argument("--min_lr", type=float, default=1e-6, help="Minimum learning rate (SGD only)")
 parser.add_argument("--lr_shrink", type=float, default=0.5, help="Shrink the learning rate if the validation metric decreases (1 to disable)")
@@ -88,8 +89,8 @@ assert os.path.isfile(params.tgt_emb)
 
 # build model / trainer / evaluator
 logger = initialize_exp(params)
-src_emb, tgt_emb, mapping, discriminator = build_model(params, True)
-trainer = Trainer(src_emb, tgt_emb, mapping, discriminator, params)
+src_emb, tgt_emb, mapping, discriminator, generator = build_model(params, True)
+trainer = Trainer(src_emb, tgt_emb, mapping, discriminator, generator, params)
 evaluator = Evaluator(trainer)
 
 

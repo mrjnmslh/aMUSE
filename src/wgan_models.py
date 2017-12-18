@@ -35,7 +35,9 @@ class Discriminator(nn.Module):
 
     def forward(self, x):
         assert x.dim() == 2 and x.size(1) == self.emb_dim
-        return self.layers(x).view(-1)
+        output = self.layers(x).view(-1)
+        output = output.mean(0)
+        return output.view(1)
 
 class Generator(nn.Module):
 
