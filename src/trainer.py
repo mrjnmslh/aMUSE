@@ -24,7 +24,7 @@ logger = getLogger()
 
 class Trainer(object):
 
-    def __init__(self, src_emb, tgt_emb, mapping, discriminator, params):
+    def __init__(self, src_emb, tgt_emb, mapping, discriminator, generator, params):
         """
         Initialize trainer script.
         """
@@ -34,6 +34,7 @@ class Trainer(object):
         self.tgt_dico = getattr(params, 'tgt_dico', None)
         self.mapping = mapping
         self.discriminator = discriminator
+        self.generator = generator
         self.params = params
 
         # optimizers
@@ -43,6 +44,9 @@ class Trainer(object):
         if hasattr(params, 'dis_optimizer'):
             optim_fn, optim_params = get_optimizer(params.dis_optimizer)
             self.dis_optimizer = optim_fn(discriminator.parameters(), **optim_params)
+        if hasattr(params, 'gen_optimizer'):
+            optim_fn, optim_params = get_optimizer(params.gen_optimizer)
+            self.gen_optimizer = optim_fn(generator.parameters(), **optim_params)
         else:
             assert discriminator is None
 
@@ -50,6 +54,9 @@ class Trainer(object):
         self.best_valid_metric = -1e12
 
         self.decrease_lr = False
+
+        self.one = torch.FloatTensor([1])
+        self.mone = self.one * -1
 
     def get_dis_xy(self, volatile):
         """
@@ -102,7 +109,7 @@ class Trainer(object):
 
         # input / target
         #x = torch.cat([src_emb, tgt_emb], 0)
-        x - src_emb # * noise
+        x = src_emb # * noise
         y = tgt_emb
         #y = torch.FloatTensor(2 * bs).zero_()
         #y[:bs] = 1 - self.params.dis_smooth
@@ -139,23 +146,25 @@ class Trainer(object):
         Train the discriminator.
         """
         self.discriminator.train()
+        self.generator.eval()
 
         # loss
         x, y = self.get_wgan_dis_xy(volatile=True)
-        real = self.discriminator(Variable(y.data))
-        fake = self.discriminator(Variable(x.data))
+        errD_real = self.discriminator(Variable(y.data))
+        errD_real.backward(self.one)
 
-        real.backward(one)
-        fake.backward(mone)
+        fake = self.generator(x.data)
+        errD_fake = self.discriminator(fake)
+        errD_fake.backward(self.mone)
 
         #loss = F.binary_cross_entropy(fake, real)
-        errD = real - fake
-        stats['DIS_COSTS'].append(errD)
+        errD = errD_real - errD_fake
+        stats['DIS_COSTS'].append(errD.data.numpy()[0])
 
         # check NaN
-        if (loss != loss).data.any():
-            logger.error("NaN detected (discriminator)")
-            exit()
+        #if (loss != loss).data.any():
+        #    logger.error("NaN detected (discriminator)")
+        #    exit()
 
         # optim
         self.dis_optimizer.zero_grad()
@@ -193,29 +202,33 @@ class Trainer(object):
 
     def wgan_generator_step(self, stats):
         """
-        Fooling discriminator training step.
+        Fooling generator training step.
         """
         if self.params.dis_lambda == 0:
             return 0
 
         self.discriminator.eval()
+        self.generator.train()
 
         # loss
         x, y = self.get_wgan_dis_xy(volatile=False)
-        preds = self.discriminator(x)
-        loss = F.binary_cross_entropy(preds, 1 - y)
-        loss = self.params.dis_lambda * loss
+        fake = self.generator(x.data)
+        errG = self.discriminator(fake)
+        errG.backward(self.one)
+        #preds = self.discriminator(x)
+        #loss = F.binary_cross_entropy(preds, 1 - y)
+        #loss = self.params.dis_lambda * loss
 
         # check NaN
-        if (loss != loss).data.any():
-            logger.error("NaN detected (fool discriminator)")
-            exit()
+        #if (loss != loss).data.any():
+        #    logger.error("NaN detected (fool discriminator)")
+        #    exit()
 
         # optim
-        self.map_optimizer.zero_grad()
-        loss.backward()
-        self.map_optimizer.step()
-        self.orthogonalize()
+        self.gen_optimizer.zero_grad()
+        #loss.backward()
+        self.gen_optimizer.step()
+        #self.orthogonalize()
 
         return 2 * self.params.batch_size
 
