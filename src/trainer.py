@@ -161,7 +161,7 @@ class Trainer(object):
 
         #loss = F.binary_cross_entropy(fake, real)
         errD = errD_real - errD_fake
-        stats['DIS_COSTS'].append(errD.data.numpy()[0])
+        stats['DIS_COSTS'].append(errD.data.cpu().numpy()[0])
 
         # check NaN
         #if (loss != loss).data.any():
