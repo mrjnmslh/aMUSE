@@ -57,6 +57,8 @@ class Trainer(object):
 
         self.one = torch.FloatTensor([1])
         self.mone = self.one * -1
+        self.one = Variable(self.one.cuda() if self.params.cuda else self.one)
+        self.mone = Variable(self.mone.cuda() if self.params.cuda else self.mone)
 
     def get_dis_xy(self, volatile):
         """
