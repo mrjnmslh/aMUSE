@@ -211,9 +211,8 @@ class Trainer(object):
 
         # optim
         self.gen_optimizer.zero_grad()
-        #loss.backward()
         self.gen_optimizer.step()
-        #self.orthogonalize()
+        self.orthogonalize()
 
         return 2 * self.params.batch_size
 
@@ -265,26 +264,16 @@ class Trainer(object):
         W.copy_(torch.from_numpy(U.dot(V_t)).type_as(W))
 
     def sinkhorn(self):
-        #A = self.src_emb.weight.data 
-        #B = self.tgt_emb.weight.data
-        #W = self.mapping.weight.data
-
         x, y, src_ids, tgt_ids = self.get_wgan_dis_xy(volatile=True)
-        #errD_real = self.discriminator(Variable(y.data))
-        #errD_real.backward(self.one)
 
+        import pdb; pdb.set_trace()
         fake = self.generator(x.data)
-        dist = fake - x
-        #errD_fake = self.discriminator(fake)
-        #errD_fake.backward(self.mone)
+        fake = fake.sum(1).view(1,-1) * torch.ones(fake.size(0), fake.size(0))
+        target = y.sum(1).view(-1,1) * torch.ones(fake.size(0), fake.size(0))
+        dist = (fake.square() + target.square() - 2 * fake * target).sqrt()
 
         # Approximate weights given emebdding index, since embeddings are sorted by frequency
         # TODO: get weights from FastText bin
-        #src_ids = torch.from_numpy(numpy.arange(1,len(self.src_dico))).long().float()
-        #tgt_ids = torch.from_numpy(numpy.arange(1,len(self.tgt_dico))).long().float()
-
-        import pdb; pdb.set_trace()
-
         src_weight_sum = (len(self.src_emb.weight.data) * (len(self.src_emb.weight.data) + 1)) / 2
         tgt_weight_sum = (len(self.tgt_emb.weight.data) * (len(self.tgt_emb.weight.data) + 1)) / 2
 
@@ -295,10 +284,10 @@ class Trainer(object):
             src_weights = src_weights.cuda()
             tgt_weights = tgt_weights.cuda()
 
-        self.sinkhorn = SinkHornAlgorithm(W)
+        self.sinkhorn = SinkHornAlgorithm(dist)
 
-        dist = self.sinkhorn(Variable(src_weights, volatile=True), Variable(tgt_weights, volatile=True))
-        dist.backward()
+        dist_loss = self.sinkhorn(Variable(src_weights, volatile=True), Variable(tgt_weights, volatile=True))
+        dist_loss.backward()
         self.sinkhorn.zero_grad()
         self.sinkhorn.step()
 
@@ -397,6 +386,7 @@ class SinkHornAlgorithm(Function):
 
         TODO: this is probably not optimal. Re-implement?
         """
+        import pdb; pdb.set_trace()
         assert src_weights.size(1) == self.na
         assert tgt_weight.size(1) == self.nb
 
