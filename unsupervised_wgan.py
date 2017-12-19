@@ -130,10 +130,6 @@ if params.adversarial:
                 for k, _ in stats_str:
                     del stats[k][:]
 
-        #to_log = OrderedDict({'n_epoch': n_epoch}) # remove me
-        #evaluator.eval_dis(to_log) # remove me
-        #trainer.save_best(to_log, VALIDATION_METRIC) #remove me
-
         # embeddings / discriminator evaluation
         to_log = OrderedDict({'n_epoch': n_epoch})
         evaluator.all_eval(to_log)
@@ -169,7 +165,8 @@ if params.refinement:
         trainer.build_dictionary()
 
         # apply Sinkhorn alogrithm as first step of dual refinement
-        trainer.sinkhorn()
+        for i in range(0, params.epoch_size, params.batch_size):
+            trainer.sinkhorn()
 
         # build a dictionary from aligned embeddings
         trainer.build_dictionary()

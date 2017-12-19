@@ -13,6 +13,7 @@ import numpy
 import torch
 from torch.autograd import Variable, Function
 from torch.nn import functional as F
+from torch.nn import Parameter
 
 from .utils import get_optimizer, export_embeddings
 from .utils import clip_parameters
@@ -263,10 +264,19 @@ class Trainer(object):
         U, S, V_t = scipy.linalg.svd(M, full_matrices=True)
         W.copy_(torch.from_numpy(U.dot(V_t)).type_as(W))
 
+    """
+    def procrustes_wgan(self, T):
+        A = self.src_emb.weight.data[self.dico[:, 0]]
+        B = self.tgt_emb.weight.data[self.dico[:, 1]]
+        W = self.mapping.weight.data
+        M = self.T.mm(B.transpose(0, 1).mm(A)).cpu().numpy()
+        U, S, V_t = scipy.linalg.svd(M, full_matrices=True)
+        W.copy_(torch.from_numpy(U.dot(V_t)).type_as(W))
+    """
+
     def sinkhorn(self):
         x, y, src_ids, tgt_ids = self.get_wgan_dis_xy(volatile=True)
 
-        import pdb; pdb.set_trace()
         fake = self.generator(x.data)
         fake = fake.sum(1).view(1,-1) * torch.ones(fake.size(0), fake.size(0))
         target = y.sum(1).view(-1,1) * torch.ones(fake.size(0), fake.size(0))
@@ -406,8 +416,8 @@ class SinkHornAlgorithm(Function):
         grad = grad-torch.mean(grad, dim=1).expand_as(grad)
         self.stored_grad = grad
 
-        dist = self.cost.new((loss,))
-        return dist
+        dist_loss = self.dist.new((loss,))
+        return dist_loss
     
     def backward(self, grad_output):
         return self.stored_grad * grad_output[0], None
