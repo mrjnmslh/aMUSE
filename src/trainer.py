@@ -396,9 +396,9 @@ class SinkHornAlgorithm(Function):
 
         TODO: this is probably not optimal. Re-implement?
         """
-        import pdb; pdb.set_trace()
-        assert src_weights.size(1) == self.na
-        assert tgt_weight.size(1) == self.nb
+        #import pdb; pdb.set_trace()
+        assert src_weights.size(0) == self.na
+        assert tgt_weight.size(0) == self.nb
 
         nbatch = src_weights.size(0)
         
