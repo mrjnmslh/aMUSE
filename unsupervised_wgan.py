@@ -15,7 +15,7 @@ import torch
 
 from src.utils import bool_flag, initialize_exp
 from src.wgan_models import build_model
-from src.trainer import Trainer
+from src.trainer import Trainer, SinkHornAlgorithm
 from src.evaluation import Evaluator
 
 

@@ -10,7 +10,7 @@ from logging import getLogger
 import scipy
 import scipy.linalg
 import torch
-from torch.autograd import Variable
+from torch.autograd import Variable, Function
 from torch.nn import functional as F
 
 from .utils import get_optimizer, export_embeddings
@@ -277,9 +277,20 @@ class Trainer(object):
         A = self.src_emb.weight.data[self.dico[:, 0]]
         B = self.tgt_emb.weight.data[self.dico[:, 1]]
         W = self.mapping.weight.data
+        import pdb; pdb.set_trace()
         M = B.transpose(0, 1).mm(A).cpu().numpy()
         U, S, V_t = scipy.linalg.svd(M, full_matrices=True)
         W.copy_(torch.from_numpy(U.dot(V_t)).type_as(W))
+
+    def sinkhorn(self, ):
+        A = self.src_emb.weight.data[self.dico[:, 0]]
+        B = self.tgt_emb.weight.data[self.dico[:, 1]]
+        W = self.mapping.weight.data
+
+        self.sinkhorn = SinkHornAlgorithm(W)
+
+        self.sinkhorn(src_weights, tgt_weights)
+
 
     def orthogonalize(self):
         """
@@ -352,3 +363,48 @@ class Trainer(object):
         src_emb = src_emb / src_emb.norm(2, 1, keepdim=True).expand_as(src_emb)
         tgt_emb = tgt_emb / tgt_emb.norm(2, 1, keepdim=True).expand_as(tgt_emb)
         export_embeddings(src_emb.cpu().numpy(), tgt_emb.cpu().numpy(), self.params)
+
+class SinkHornAlgorithm(Function):
+    def __init__(self, dist, lam = 1e-3, sinkhorn_iter = 50):
+        super(SinkHornAlgorithm,self).__init__()
+        
+        # dist = matrix M = distance matrix
+        # lam = lambda of type float > 0
+        # sinkhorn_iter > 0
+        # diagonal dist should be 0
+        self.dist = dist
+        self.lam = lam
+        self.sinkhorn_iter = sinkhorn_iter
+        self.na = dist.size(0)
+        self.nb = dist.size(1)
+        self.K = torch.exp(-self.dist/self.lam)
+        self.KM = self.dist*self.K
+        self.stored_grad = None
+        
+    def forward(self, pred, target):
+        """pred: Batch * K: K = # mass points
+           target: Batch * L: L = # mass points"""
+        assert pred.size(1)==self.na
+        assert target.size(1)==self.nb
+
+        nbatch = pred.size(0)
+        
+        u = self.dist.new(nbatch, self.na).fill_(1.0/self.na)
+        
+        for i in range(self.sinkhorn_iter):
+            v = target/(torch.mm(u,self.K.t()))
+            u = pred/(torch.mm(v,self.K))
+            if (u!=u).sum()>0 or (v!=v).sum()>0 or u.max()>1e9 or v.max()>1e9:
+                raise Exception(str(('Warning: numerical errrors',i+1,"u",(u!=u).sum(),u.max(),"v",(v!=v).sum(),v.max())))
+
+        loss = (u*torch.mm(v,self.KM.t())).mean(0).sum()
+        grad = self.lam*u.log()/nbatch 
+        grad = grad-torch.mean(grad,dim=1).expand_as(grad)
+        grad = grad-torch.mean(grad,dim=1).expand_as(grad)
+        self.stored_grad = grad
+
+        dist = self.cost.new((loss,))
+        return dist
+    
+    def backward(self, grad_output):
+        return self.stored_grad*grad_output[0],None
