@@ -264,17 +264,18 @@ class Trainer(object):
         U, S, V_t = scipy.linalg.svd(M, full_matrices=True)
         W.copy_(torch.from_numpy(U.dot(V_t)).type_as(W))
 
-    """
-    def procrustes_wgan(self, T):
-        A = self.src_emb.weight.data[self.dico[:, 0]]
-        B = self.tgt_emb.weight.data[self.dico[:, 1]]
-        W = self.mapping.weight.data
-        M = self.T.mm(B.transpose(0, 1).mm(A)).cpu().numpy()
-        U, S, V_t = scipy.linalg.svd(M, full_matrices=True)
-        W.copy_(torch.from_numpy(U.dot(V_t)).type_as(W))
-    """
+        """
+        def procrustes_wgan(self, T):
+            A = self.src_emb.weight.data[self.dico[:, 0]]
+            B = self.tgt_emb.weight.data[self.dico[:, 1]]
+            W = self.mapping.weight.data
+            M = self.T.mm(B.transpose(0, 1).mm(A)).cpu().numpy()
+            U, S, V_t = scipy.linalg.svd(M, full_matrices=True)
+            W.copy_(torch.from_numpy(U.dot(V_t)).type_as(W))
+        """
 
     def sinkhorn(self):
+        import pdb; pdb.set_trace()
         x, y, src_ids, tgt_ids = self.get_wgan_dis_xy(volatile=True)
 
         fake = self.generator(x.data)
