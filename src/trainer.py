@@ -9,6 +9,7 @@ import os
 from logging import getLogger
 import scipy
 import scipy.linalg
+import numpy
 import torch
 from torch.autograd import Variable, Function
 from torch.nn import functional as F
@@ -110,15 +111,10 @@ class Trainer(object):
         tgt_emb = Variable(tgt_emb.data, volatile=volatile)
 
         # input / target
-        #x = torch.cat([src_emb, tgt_emb], 0)
         x = src_emb # * noise
         y = tgt_emb
-        #y = torch.FloatTensor(2 * bs).zero_()
-        #y[:bs] = 1 - self.params.dis_smooth
-        #y[bs:] = self.params.dis_smooth
-        #y = Variable(y.cuda() if self.params.cuda else y)
 
-        return x, y
+        return x, y, src_ids, tgt_ids
 
     def dis_step(self, stats):
         """
@@ -151,7 +147,7 @@ class Trainer(object):
         self.generator.eval()
 
         # loss
-        x, y = self.get_wgan_dis_xy(volatile=True)
+        x, y, _, _ = self.get_wgan_dis_xy(volatile=True)
         errD_real = self.discriminator(Variable(y.data))
         errD_real.backward(self.one)
 
@@ -162,11 +158,6 @@ class Trainer(object):
         #loss = F.binary_cross_entropy(fake, real)
         errD = errD_real - errD_fake
         stats['DIS_COSTS'].append(errD.data.cpu().numpy()[0])
-
-        # check NaN
-        #if (loss != loss).data.any():
-        #    logger.error("NaN detected (discriminator)")
-        #    exit()
 
         # optim
         self.dis_optimizer.zero_grad()
@@ -213,18 +204,10 @@ class Trainer(object):
         self.generator.train()
 
         # loss
-        x, y = self.get_wgan_dis_xy(volatile=False)
+        x, y, _, _ = self.get_wgan_dis_xy(volatile=False)
         fake = self.generator(x.data)
         errG = self.discriminator(fake)
         errG.backward(self.one)
-        #preds = self.discriminator(x)
-        #loss = F.binary_cross_entropy(preds, 1 - y)
-        #loss = self.params.dis_lambda * loss
-
-        # check NaN
-        #if (loss != loss).data.any():
-        #    logger.error("NaN detected (fool discriminator)")
-        #    exit()
 
         # optim
         self.gen_optimizer.zero_grad()
@@ -277,20 +260,47 @@ class Trainer(object):
         A = self.src_emb.weight.data[self.dico[:, 0]]
         B = self.tgt_emb.weight.data[self.dico[:, 1]]
         W = self.mapping.weight.data
-        import pdb; pdb.set_trace()
         M = B.transpose(0, 1).mm(A).cpu().numpy()
         U, S, V_t = scipy.linalg.svd(M, full_matrices=True)
         W.copy_(torch.from_numpy(U.dot(V_t)).type_as(W))
 
-    def sinkhorn(self, ):
-        A = self.src_emb.weight.data[self.dico[:, 0]]
-        B = self.tgt_emb.weight.data[self.dico[:, 1]]
-        W = self.mapping.weight.data
+    def sinkhorn(self):
+        #A = self.src_emb.weight.data 
+        #B = self.tgt_emb.weight.data
+        #W = self.mapping.weight.data
+
+        x, y, src_ids, tgt_ids = self.get_wgan_dis_xy(volatile=True)
+        #errD_real = self.discriminator(Variable(y.data))
+        #errD_real.backward(self.one)
+
+        fake = self.generator(x.data)
+        dist = fake - x
+        #errD_fake = self.discriminator(fake)
+        #errD_fake.backward(self.mone)
+
+        # Approximate weights given emebdding index, since embeddings are sorted by frequency
+        # TODO: get weights from FastText bin
+        #src_ids = torch.from_numpy(numpy.arange(1,len(self.src_dico))).long().float()
+        #tgt_ids = torch.from_numpy(numpy.arange(1,len(self.tgt_dico))).long().float()
+
+        import pdb; pdb.set_trace()
+
+        src_weight_sum = (len(self.src_emb.weight.data) * (len(self.src_emb.weight.data) + 1)) / 2
+        tgt_weight_sum = (len(self.tgt_emb.weight.data) * (len(self.tgt_emb.weight.data) + 1)) / 2
+
+        src_weights = src_ids.float() / float(src_weight_sum)
+        tgt_weights = tgt_ids.float() / float(tgt_weight_sum)
+
+        if self.params.cuda:
+            src_weights = src_weights.cuda()
+            tgt_weights = tgt_weights.cuda()
 
         self.sinkhorn = SinkHornAlgorithm(W)
 
-        self.sinkhorn(src_weights, tgt_weights)
-
+        dist = self.sinkhorn(Variable(src_weights, volatile=True), Variable(tgt_weights, volatile=True))
+        dist.backward()
+        self.sinkhorn.zero_grad()
+        self.sinkhorn.step()
 
     def orthogonalize(self):
         """
@@ -365,46 +375,49 @@ class Trainer(object):
         export_embeddings(src_emb.cpu().numpy(), tgt_emb.cpu().numpy(), self.params)
 
 class SinkHornAlgorithm(Function):
-    def __init__(self, dist, lam = 1e-3, sinkhorn_iter = 50):
-        super(SinkHornAlgorithm,self).__init__()
-        
-        # dist = matrix M = distance matrix
-        # lam = lambda of type float > 0
-        # sinkhorn_iter > 0
-        # diagonal dist should be 0
+    """
+    This code was built on top of Thomas Viehmann's Batch Sinkhorn Iteration Wasserstein Distance, https://github.com/t-vi/pytorch-tvmisc/wasserstein-distance/Pytorch_Wasserstein.ipynb
+    """
+    def __init__(self, dist, lam=1e-3, sinkhorn_iter=50):
+        super(SinkHornAlgorithm, self).__init__()
+
         self.dist = dist
         self.lam = lam
         self.sinkhorn_iter = sinkhorn_iter
         self.na = dist.size(0)
         self.nb = dist.size(1)
         self.K = torch.exp(-self.dist/self.lam)
-        self.KM = self.dist*self.K
+        self.KM = self.dist * self.K
         self.stored_grad = None
         
-    def forward(self, pred, target):
-        """pred: Batch * K: K = # mass points
-           target: Batch * L: L = # mass points"""
-        assert pred.size(1)==self.na
-        assert target.size(1)==self.nb
+    def forward(self, src_weights, tgt_weight):
+        """
+        src_weights: source embedding mass points/frequence
+        tgt_weight: target embedding mass points/frequence
 
-        nbatch = pred.size(0)
+        TODO: this is probably not optimal. Re-implement?
+        """
+        assert src_weights.size(1) == self.na
+        assert tgt_weight.size(1) == self.nb
+
+        nbatch = src_weights.size(0)
         
         u = self.dist.new(nbatch, self.na).fill_(1.0/self.na)
         
         for i in range(self.sinkhorn_iter):
-            v = target/(torch.mm(u,self.K.t()))
-            u = pred/(torch.mm(v,self.K))
+            v = tgt_weight / (torch.mm(u, self.K.t()))
+            u = src_weights / (torch.mm(v, self.K))
             if (u!=u).sum()>0 or (v!=v).sum()>0 or u.max()>1e9 or v.max()>1e9:
-                raise Exception(str(('Warning: numerical errrors',i+1,"u",(u!=u).sum(),u.max(),"v",(v!=v).sum(),v.max())))
+                raise Exception(str(('Warning: numerical errrors', i+1, "u", (u!=u).sum(), u.max(), "v",(v!=v).sum(), v.max())))
 
-        loss = (u*torch.mm(v,self.KM.t())).mean(0).sum()
-        grad = self.lam*u.log()/nbatch 
-        grad = grad-torch.mean(grad,dim=1).expand_as(grad)
-        grad = grad-torch.mean(grad,dim=1).expand_as(grad)
+        loss = (u * torch.mm(v, self.KM.t())).mean(0).sum()
+        grad = self.lam * u.log()/nbatch 
+        grad = grad-torch.mean(grad, dim=1).expand_as(grad)
+        grad = grad-torch.mean(grad, dim=1).expand_as(grad)
         self.stored_grad = grad
 
         dist = self.cost.new((loss,))
         return dist
     
     def backward(self, grad_output):
-        return self.stored_grad*grad_output[0],None
+        return self.stored_grad * grad_output[0], None

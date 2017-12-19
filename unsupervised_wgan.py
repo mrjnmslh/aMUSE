@@ -21,7 +21,6 @@ from src.evaluation import Evaluator
 
 VALIDATION_METRIC = 'mean_cosine-csls_knn_10-S2T-10000'
 
-
 # main
 parser = argparse.ArgumentParser(description='Unsupervised training')
 parser.add_argument("--seed", type=int, default=-1, help="Initialization seed")
@@ -59,7 +58,7 @@ parser.add_argument("--lr_decay", type=float, default=0.98, help="Learning rate 
 parser.add_argument("--min_lr", type=float, default=1e-6, help="Minimum learning rate (SGD only)")
 parser.add_argument("--lr_shrink", type=float, default=0.5, help="Shrink the learning rate if the validation metric decreases (1 to disable)")
 # training refinement
-parser.add_argument("--refinement", type=bool_flag, default=False, help="Use iterative Procrustes refinement")
+parser.add_argument("--refinement", type=bool_flag, default=True, help="Use iterative Sinkhorn and Procrustes refinement")
 parser.add_argument("--n_iters", type=int, default=5, help="Number of iterations")
 # dictionary creation parameters (for refinement)
 parser.add_argument("--dico_method", type=str, default='csls_knn_10', help="Method used for dictionary generation (nn/invsm_beta_30/csls_knn_10)")
@@ -131,6 +130,10 @@ if params.adversarial:
                 for k, _ in stats_str:
                     del stats[k][:]
 
+        #to_log = OrderedDict({'n_epoch': n_epoch}) # remove me
+        #evaluator.eval_dis(to_log) # remove me
+        #trainer.save_best(to_log, VALIDATION_METRIC) #remove me
+
         # embeddings / discriminator evaluation
         to_log = OrderedDict({'n_epoch': n_epoch})
         evaluator.all_eval(to_log)
@@ -148,12 +151,13 @@ if params.adversarial:
             break
 
 
+
 """
 Learning loop for Procrustes Iterative Refinement
 """
 if params.refinement:
     # Get the best mapping according to VALIDATION_METRIC
-    logger.info('----> ITERATIVE PROCRUSTES REFINEMENT <----\n\n')
+    logger.info('----> ITERATIVE SINKHORN+PROCRUSTES REFINEMENT <----\n\n')
     trainer.reload_best()
 
     # training loop
@@ -164,7 +168,13 @@ if params.refinement:
         # build a dictionary from aligned embeddings
         trainer.build_dictionary()
 
-        # apply the Procrustes solution
+        # apply Sinkhorn alogrithm as first step of dual refinement
+        trainer.sinkhorn()
+
+        # build a dictionary from aligned embeddings
+        trainer.build_dictionary()
+
+        # apply the Procrustes solution as second step of refinement
         trainer.procrustes()
 
         # embeddings evaluation
