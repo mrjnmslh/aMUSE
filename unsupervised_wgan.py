@@ -13,11 +13,10 @@ from collections import OrderedDict
 import numpy as np
 import torch
 
-from src.utils import bool_flag, initialize_exp
+from src.utils import bool_flag, initialize_exp, get_optimizer
 from src.wgan_models import build_model
 from src.trainer import Trainer, SinkHornAlgorithm
 from src.evaluation import Evaluator
-
 
 VALIDATION_METRIC = 'mean_cosine-csls_knn_10-S2T-10000'
 
@@ -54,6 +53,7 @@ parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
 parser.add_argument("--map_optimizer", type=str, default="sgd,lr=0.1", help="Mapping optimizer")
 parser.add_argument("--dis_optimizer", type=str, default="sgd,lr=0.1", help="Discriminator optimizer")
 parser.add_argument("--gen_optimizer", type=str, default="sgd,lr=0.1", help="Discriminator optimizer")
+parser.add_argument("--sinkhorn_optimizer", type=str, default="sgd,lr=0.1", help="Discriminator optimizer")
 parser.add_argument("--lr_decay", type=float, default=0.98, help="Learning rate decay (SGD only)")
 parser.add_argument("--min_lr", type=float, default=1e-6, help="Minimum learning rate (SGD only)")
 parser.add_argument("--lr_shrink", type=float, default=0.5, help="Shrink the learning rate if the validation metric decreases (1 to disable)")
@@ -147,22 +147,18 @@ if params.adversarial:
             break
 
 
-
 """
 Learning loop for Procrustes Iterative Refinement
 """
 if params.refinement:
     # Get the best mapping according to VALIDATION_METRIC
-    logger.info('----> ITERATIVE SINKHORN+PROCRUSTES REFINEMENT <----\n\n')
+    logger.info('----> ITERATIVE SINKHORN + PROCRUSTES REFINEMENT <----\n\n')
     trainer.reload_best()
 
     # training loop
     for n_iter in range(params.n_iters):
 
         logger.info('Starting refinement iteration %i...' % n_iter)
-
-        # build a dictionary from aligned embeddings
-        trainer.build_dictionary()
 
         # apply Sinkhorn alogrithm as first step of dual refinement
         for i in range(0, params.epoch_size, params.batch_size):

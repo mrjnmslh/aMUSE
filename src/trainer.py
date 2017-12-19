@@ -294,12 +294,14 @@ class Trainer(object):
             src_weights = src_weights.cuda()
             tgt_weights = tgt_weights.cuda()
 
-        self.sinkhorn = SinkHornAlgorithm(dist)
+        self.sinkhorn_c = SinkHornAlgorithm(dist.data)
 
-        dist_loss = self.sinkhorn(Variable(src_weights, volatile=True), Variable(tgt_weights, volatile=True))
-        dist_loss.backward()
-        self.sinkhorn.zero_grad()
-        self.sinkhorn.step()
+        dist_loss = self.sinkhorn_c(Variable(src_weights, volatile=True), Variable(tgt_weights, volatile=True))
+
+        if (dist_loss != dist_loss).data.any():
+            pass
+        else:
+            dist_loss.backward()
 
     def orthogonalize(self):
         """
@@ -375,7 +377,9 @@ class Trainer(object):
 
 class SinkHornAlgorithm(Function):
     """
-    This code was built on top of Thomas Viehmann's Batch Sinkhorn Iteration Wasserstein Distance, https://github.com/t-vi/pytorch-tvmisc/wasserstein-distance/Pytorch_Wasserstein.ipynb
+    This code was built on top of Thomas Viehmann's Batch Sinkhorn 
+    Iteration Wasserstein Distance, 
+    https://github.com/t-vi/pytorch-tvmisc/wasserstein-distance/Pytorch_Wasserstein.ipynb
     """
     def __init__(self, dist, lam=1e-3, sinkhorn_iter=50):
         super(SinkHornAlgorithm, self).__init__()
@@ -396,7 +400,6 @@ class SinkHornAlgorithm(Function):
 
         TODO: this is probably not optimal. Re-implement?
         """
-        #import pdb; pdb.set_trace()
         assert src_weights.size(0) == self.na
         assert tgt_weight.size(0) == self.nb
 
@@ -407,8 +410,6 @@ class SinkHornAlgorithm(Function):
         for i in range(self.sinkhorn_iter):
             v = tgt_weight / (torch.mm(u, self.K.t()))
             u = src_weights / (torch.mm(v, self.K))
-            if (u!=u).sum()>0 or (v!=v).sum()>0 or u.max()>1e9 or v.max()>1e9:
-                raise Exception(str(('Warning: numerical errrors', i+1, "u", (u!=u).sum(), u.max(), "v",(v!=v).sum(), v.max())))
 
         loss = (u * torch.mm(v, self.KM.t())).mean(0).sum()
         grad = self.lam * u.log()/nbatch 
