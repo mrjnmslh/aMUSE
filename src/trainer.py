@@ -275,13 +275,12 @@ class Trainer(object):
         """
 
     def sinkhorn(self):
-        import pdb; pdb.set_trace()
         x, y, src_ids, tgt_ids = self.get_wgan_dis_xy(volatile=True)
 
         fake = self.generator(x.data)
-        fake = fake.sum(1).view(1,-1) * torch.ones(fake.size(0), fake.size(0))
-        target = y.sum(1).view(-1,1) * torch.ones(fake.size(0), fake.size(0))
-        dist = (fake.square() + target.square() - 2 * fake * target).sqrt()
+        fake = fake.sum(1).expand_as(torch.ones(fake.size(0), fake.size(0)))
+        target = y.sum(1).expand_as(torch.ones(y.size(0), y.size(0)))
+        dist = ((fake ** 2) + (target ** 2) - 2 * fake * target).sqrt()
 
         # Approximate weights given emebdding index, since embeddings are sorted by frequency
         # TODO: get weights from FastText bin
